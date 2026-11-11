@@ -1,3 +1,4 @@
+// S2Arm: distinguish network-account setup from local-user selection.
 using Microsoft.IO;
 using Ryujinx.Common;
 using Ryujinx.Common.Logging;
@@ -48,6 +49,19 @@ namespace Ryujinx.HLE.HOS.Applets
                 accounts.AddUser(name, EmbeddedResources.Read("Ryujinx.HLE/HOS/Services/Account/Acc/DefaultUserImage.jpg"), created);
                 Logger.Info?.Print(LogClass.ServiceAm, $"User creator applet created user {created} \"{name}\" (no nickname / icon UI on the host)");
                 _normalSession.Push(BuildResponse(created));
+                AppletStateChanged?.Invoke(this, null);
+                _system.ReturnFocus();
+
+                return ResultCode.Success;
+            }
+
+            // UiMode 2 is EnsureNetworkServiceAccountAvailable (Profile Selector
+            // protocol), not a local-user selector. No network account is linked
+            // on this host, so completing this flow successfully would contradict
+            // CheckAvailability/GetAccountId. Complete it as cancelled instead.
+            if (uiSettings != null && uiSettings.Length >= 4 && BitConverter.ToUInt32(uiSettings, 0) == UiModeEnsureNetworkServiceAccountAvailable)
+            {
+                _normalSession.Push(BuildCancelledResponse());
                 AppletStateChanged?.Invoke(this, null);
                 _system.ReturnFocus();
 
@@ -110,6 +124,16 @@ namespace Ryujinx.HLE.HOS.Applets
         }
 
         private const uint UiModeUserCreator = 1;
+        private const uint UiModeEnsureNetworkServiceAccountAvailable = 2;
+
+        private static byte[] BuildCancelledResponse()
+        {
+            // UiReturnArg: u64 Result, then a 16-byte Uid. The SDK returns the
+            // result directly; 2124-0001 is the account UI cancellation result.
+            byte[] response = new byte[0x18];
+            BitConverter.GetBytes(0x27CUL).CopyTo(response, 0);
+            return response;
+        }
 
         private static byte[] BuildResponse()
         {
